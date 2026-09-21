@@ -2,23 +2,19 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# ============================================================
+# ----------------------------
 # IAM Role for EKS Cluster
-# ============================================================
-
+# ----------------------------
 resource "aws_iam_role" "master" {
   name = "yaswanth-eks-master1"
 
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-
+    Version = "2012-10-17",
     Statement = [{
-      Effect = "Allow"
-
+      Effect = "Allow",
       Principal = {
         Service = "eks.amazonaws.com"
-      }
-
+      },
       Action = "sts:AssumeRole"
     }]
   })
@@ -39,41 +35,29 @@ resource "aws_iam_role_policy_attachment" "AmazonEKSVPCResourceController" {
   role       = aws_iam_role.master.name
 }
 
-# ============================================================
+# ----------------------------
 # IAM Role for Worker Nodes
-# ============================================================
-
+# ----------------------------
 resource "aws_iam_role" "worker" {
   name = "yaswanth-eks-worker1"
 
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-
+    Version = "2012-10-17",
     Statement = [{
-      Effect = "Allow"
-
+      Effect = "Allow",
       Principal = {
         Service = "ec2.amazonaws.com"
-      }
-
+      },
       Action = "sts:AssumeRole"
     }]
   })
 }
 
-# ============================================================
-# Cluster Autoscaler IAM Policy
-# ============================================================
-
 resource "aws_iam_policy" "autoscaler" {
   name = "yaswanth-eks-autoscaler-policy1"
-
   policy = jsonencode({
-    Version = "2012-10-17"
-
+    Version = "2012-10-17",
     Statement = [{
-      Effect = "Allow"
-
       Action = [
         "autoscaling:DescribeAutoScalingGroups",
         "autoscaling:DescribeAutoScalingInstances",
@@ -82,8 +66,8 @@ resource "aws_iam_policy" "autoscaler" {
         "autoscaling:SetDesiredCapacity",
         "autoscaling:TerminateInstanceInAutoScalingGroup",
         "ec2:DescribeLaunchTemplateVersions"
-      ]
-
+      ],
+      Effect   = "Allow",
       Resource = "*"
     }]
   })
@@ -120,95 +104,54 @@ resource "aws_iam_role_policy_attachment" "autoscaler" {
 }
 
 resource "aws_iam_instance_profile" "worker" {
-  depends_on = [
-    aws_iam_role.worker
-  ]
-
-  name = "yaswanth-eks-worker-profile1"
-  role = aws_iam_role.worker.name
+  depends_on = [aws_iam_role.worker]
+  name       = "yaswanth-eks-worker-profile1"
+  role       = aws_iam_role.worker.name
 }
 
-# ============================================================
-# VPC
-# ============================================================
-#
-# IMPORTANT:
-# Specify ONE VPC ID.
-#
-# This fixes:
-# "multiple EC2 VPCs matched"
-#
-# ============================================================
-
+# ----------------------------
+# VPC and Subnet Data Sources
+# ----------------------------
 data "aws_vpc" "main" {
-  id = var.vpc_id
+  tags = {
+    Name = "Jumphost-vpc"
+  }
 }
-
-# ============================================================
-# Subnet 1
-# ============================================================
 
 data "aws_subnet" "subnet-1" {
   vpc_id = data.aws_vpc.main.id
-
   filter {
-    name = "tag:Name"
-
-    values = [
-      "Public-Subnet-1"
-    ]
+    name   = "tag:Name"
+    values = ["Public-Subnet-1"]
   }
 }
-
-# ============================================================
-# Subnet 2
-# ============================================================
 
 data "aws_subnet" "subnet-2" {
   vpc_id = data.aws_vpc.main.id
-
   filter {
-    name = "tag:Name"
-
-    values = [
-      "Public-subnet2"
-    ]
+    name   = "tag:Name"
+    values = ["Public-subnet2"]
   }
 }
-
-# ============================================================
-# Security Group
-# ============================================================
 
 data "aws_security_group" "selected" {
   vpc_id = data.aws_vpc.main.id
-
   filter {
-    name = "tag:Name"
-
-    values = [
-      "Jumphost-sg"
-    ]
+    name   = "tag:Name"
+    values = ["Jumphost-sg"]
   }
 }
 
-# ============================================================
+# ----------------------------
 # EKS Cluster
-# ============================================================
-
+# ----------------------------
 resource "aws_eks_cluster" "eks" {
   name     = "project-eks"
   role_arn = aws_iam_role.master.arn
 
   vpc_config {
-    subnet_ids = [
-      data.aws_subnet.subnet-1.id,
-      data.aws_subnet.subnet-2.id
-    ]
-
-    security_group_ids = [
-      data.aws_security_group.selected.id
-    ]
+    subnet_ids         = [data.aws_subnet.subnet-1.id, data.aws_subnet.subnet-2.id]
+    security_group_ids = [data.aws_security_group.selected.id]
   }
 
   tags = {
@@ -220,33 +163,22 @@ resource "aws_eks_cluster" "eks" {
   depends_on = [
     aws_iam_role_policy_attachment.AmazonEKSClusterPolicy,
     aws_iam_role_policy_attachment.AmazonEKSServicePolicy,
-    aws_iam_role_policy_attachment.AmazonEKSVPCResourceController
+    aws_iam_role_policy_attachment.AmazonEKSVPCResourceController,
   ]
 }
 
-# ============================================================
+
+# ----------------------------
 # EKS Node Group
-# ============================================================
-
+# ----------------------------
 resource "aws_eks_node_group" "node-grp" {
-  cluster_name = aws_eks_cluster.eks.name
-
+  cluster_name    = aws_eks_cluster.eks.name
   node_group_name = var.node_group_name
-
-  node_role_arn = aws_iam_role.worker.arn
-
-  subnet_ids = [
-    data.aws_subnet.subnet-1.id,
-    data.aws_subnet.subnet-2.id
-  ]
-
-  capacity_type = "ON_DEMAND"
-
-  disk_size = 20
-
-  instance_types = [
-    "t2.large"
-  ]
+  node_role_arn   = aws_iam_role.worker.arn
+  subnet_ids      = [data.aws_subnet.subnet-1.id, data.aws_subnet.subnet-2.id]
+  capacity_type   = "ON_DEMAND"
+  disk_size       = 20
+  instance_types  = ["t2.large"]
 
   labels = {
     env = "dev"
@@ -271,46 +203,23 @@ resource "aws_eks_node_group" "node-grp" {
     aws_iam_role_policy_attachment.AmazonEKS_CNI_Policy,
     aws_iam_role_policy_attachment.AmazonEC2ContainerRegistryReadOnly,
     aws_iam_role_policy_attachment.AmazonSSMManagedInstanceCore,
-    aws_iam_role_policy_attachment.autoscaler
+    aws_iam_role_policy_attachment.autoscaler,
   ]
 }
 
-# ============================================================
-# EKS Cluster Data Source
-# ============================================================
-
+# ----------------------------
+# OIDC Provider for ServiceAccount IAM Roles
+# ----------------------------
 data "aws_eks_cluster" "eks_oidc" {
   name = aws_eks_cluster.eks.name
-
-  depends_on = [
-    aws_eks_cluster.eks
-  ]
 }
-
-# ============================================================
-# TLS Certificate for OIDC
-# ============================================================
 
 data "tls_certificate" "oidc_thumbprint" {
   url = data.aws_eks_cluster.eks_oidc.identity[0].oidc[0].issuer
-
-  depends_on = [
-    aws_eks_cluster.eks
-  ]
 }
 
-# ============================================================
-# IAM OIDC Provider
-# ============================================================
-
 resource "aws_iam_openid_connect_provider" "eks_oidc" {
-  client_id_list = [
-    "sts.amazonaws.com"
-  ]
-
-  thumbprint_list = [
-    data.tls_certificate.oidc_thumbprint.certificates[0].sha1_fingerprint
-  ]
-
-  url = data.aws_eks_cluster.eks_oidc.identity[0].oidc[0].issuer
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.oidc_thumbprint.certificates[0].sha1_fingerprint]
+  url             = data.aws_eks_cluster.eks_oidc.identity[0].oidc[0].issuer
 }
